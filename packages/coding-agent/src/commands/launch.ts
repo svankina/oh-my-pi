@@ -76,7 +76,7 @@ export default class Index extends Command {
 		}),
 		resume: Flags.string({
 			char: "r",
-			description: "Resume a session (by ID prefix, path, or picker if omitted)",
+			description: "Resume a session (by ID prefix, name/title, path, or picker if omitted)",
 		}),
 		"session-dir": Flags.string({
 			description: "Directory for session storage and lookup",

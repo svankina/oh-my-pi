@@ -84,8 +84,8 @@ Breadcrumb writes are best-effort and non-fatal.
 
 2. Resume key value
    - `resolveResumableSession(...)` searches local sessions first, then all sessions when `sessionDir` is not forced
-   - matching is case-insensitive and accepts `id` prefix, full JSONL filename prefix, or the session-id suffix after the timestamp
-   - first match in modified-descending order is used (no ambiguity prompt)
+   - matching is case-insensitive and accepts `id` prefix, full JSONL filename prefix, the session-id suffix after the timestamp, or the session title
+   - first match in modified-descending order is used (no ambiguity prompt); id/filename matches beat title matches
 
 Cross-project match behavior:
 
@@ -244,6 +244,6 @@ Switch/open can still throw on true I/O failures (permission errors, rewrite fai
 
 ### ID prefix matching caveats
 
-- Matching uses `startsWith` on the lowercased session id, lowercased JSONL filename, and lowercased id suffix after the filename timestamp.
+- Matching uses `startsWith` on the lowercased session id, lowercased JSONL filename, and lowercased id suffix after the filename timestamp, plus exact-then-substring matching on the lowercased session title.
 - First match in modified-descending order wins; there is no ambiguity UI if multiple sessions share a prefix.
 - Prefix-listing metadata is intentionally lightweight, so search text may not include messages outside the first 4KB of the session file.

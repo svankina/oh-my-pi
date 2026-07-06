@@ -102,12 +102,12 @@ describe("resolveResumableSession", () => {
 		removeSyncWithRetries(tempDir);
 	});
 
-	function writeSession(fileName: string, headerCwd: string, id: string = Snowflake.next()): string {
+	function writeSession(fileName: string, headerCwd: string, id: string = Snowflake.next(), title?: string): string {
 		const filePath = path.join(sessionDir, fileName);
 		fs.writeFileSync(
 			filePath,
 			`${[
-				JSON.stringify({ type: "session", id, timestamp: "2025-01-01T00:00:00Z", cwd: headerCwd }),
+				JSON.stringify({ type: "session", id, timestamp: "2025-01-01T00:00:00Z", cwd: headerCwd, title }),
 				JSON.stringify({
 					type: "message",
 					id: "msg-1",
@@ -154,6 +154,42 @@ describe("resolveResumableSession", () => {
 
 		expect(match?.scope).toBe("local");
 		expect(match?.session.path).toBe(path.join(sessionDir, "2025-01-01_moved.jsonl"));
+	});
+	it("matches by exact title, case-insensitively", async () => {
+		writeSession("2025-01-01_titled.jsonl", "/tmp/project", "titled1234", "Fast GPT");
+
+		const match = await resolveResumableSession("fast gpt", "/tmp/project", sessionDir);
+
+		expect(match?.scope).toBe("local");
+		expect(match?.session.id).toBe("titled1234");
+	});
+
+	it("matches by title substring when no exact title matches", async () => {
+		writeSession("2025-01-01_titled.jsonl", "/tmp/project", "titled1234", "Fast GPT experiments");
+
+		const match = await resolveResumableSession("gpt exper", "/tmp/project", sessionDir);
+
+		expect(match?.session.id).toBe("titled1234");
+	});
+
+	it("prefers id prefix over a more recent title match", async () => {
+		writeSession("2025-01-01_by-id.jsonl", "/tmp/project", "abc123def");
+		await new Promise(r => setTimeout(r, 10));
+		writeSession("2025-01-02_by-title.jsonl", "/tmp/project", "zzz999zzz", "abc123def notes");
+
+		const match = await resolveResumableSession("abc123", "/tmp/project", sessionDir);
+
+		expect(match?.session.id).toBe("abc123def");
+	});
+
+	it("prefers an exact title over a more recent substring title match", async () => {
+		writeSession("2025-01-01_exact.jsonl", "/tmp/project", "exact12345", "fast gpt");
+		await new Promise(r => setTimeout(r, 10));
+		writeSession("2025-01-02_partial.jsonl", "/tmp/project", "partial123", "fast gpt extras");
+
+		const match = await resolveResumableSession("fast gpt", "/tmp/project", sessionDir);
+
+		expect(match?.session.id).toBe("exact12345");
 	});
 });
 

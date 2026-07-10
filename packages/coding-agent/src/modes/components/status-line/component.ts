@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, UsageReport } from "@oh-my-pi/pi-ai";
 import { type Component, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import { getProjectDir } from "@oh-my-pi/pi-utils";
 import { $ } from "bun";
@@ -16,6 +16,12 @@ import { getPreset } from "./presets";
 import { renderSegment, type SegmentContext } from "./segments";
 import { getSeparator } from "./separators";
 import { calculateTokensPerSecond } from "./token-rate";
+import {
+	projectUsageLimits,
+	type StatusLineUsageLimit,
+	type UsageSelection,
+	usageSelectionKey,
+} from "./usage-limits";
 import type {
 	CollabStatus,
 	EffectiveStatusLineSettings,
@@ -157,6 +163,12 @@ const EMPTY_MESSAGES: readonly AgentMessage[] = [];
 const STATUS_USAGE_START_DELAY_MS = 0;
 const STATUS_USAGE_REFRESH_TIMEOUT_MS = 2_000;
 
+interface UsageRefreshTarget {
+	session: AgentSession;
+	selection: UsageSelection;
+	key: string;
+}
+
 function hasContextSegment(segments: readonly StatusLineSegmentId[]): boolean {
 	return segments.includes("context_pct") || segments.includes("context_total");
 }
@@ -207,13 +219,11 @@ export class StatusLineComponent implements Component {
 	#lastTokensPerSecond: number | null = null;
 	#lastTokensPerSecondTimestamp: number | null = null;
 
-	// Anthropic usage caching (5-min TTL, OAuth/sub only)
-	#cachedUsage: {
-		fiveHour?: { percent: number; resetMinutes?: number };
-		sevenDay?: { percent: number; resetHours?: number };
-	} | null = null;
+	// Usage caching (5-min TTL, keyed by model and active OAuth account)
+	#cachedUsage: readonly StatusLineUsageLimit[] = [];
 	#usageFetchedAt = 0;
-	#usageInFlight = false;
+	#usageInFlightKey: string | null = null;
+	#usageSelectionKey: string | null = null;
 	#usageStartTimer: Timer | null = null;
 	// Context-usage memo. The status line redraws on every agent event, so the
 	// hot path must not recompute context tokens unless an input changed.
@@ -348,6 +358,10 @@ export class StatusLineComponent implements Component {
 		this.#disposed = true;
 		this.#onBranchChange = null;
 		this.#clearUsageStartTimer();
+		this.#cachedUsage = [];
+		this.#usageFetchedAt = 0;
+		this.#usageInFlightKey = null;
+		this.#usageSelectionKey = null;
 		if (this.#gitWatcher) {
 			this.#gitWatcher.close();
 			this.#gitWatcher = null;
@@ -365,9 +379,10 @@ export class StatusLineComponent implements Component {
 	}
 	#invalidateSessionCaches(): void {
 		this.#clearUsageStartTimer();
-		this.#cachedUsage = null;
+		this.#cachedUsage = [];
 		this.#usageFetchedAt = 0;
-		this.#usageInFlight = false;
+		this.#usageInFlightKey = null;
+		this.#usageSelectionKey = null;
 		this.#contextUsageCache = undefined;
 		this.#lastTokensPerSecond = null;
 		this.#lastTokensPerSecondTimestamp = null;
@@ -531,63 +546,100 @@ export class StatusLineComponent implements Component {
 		return null;
 	}
 
+	#resolveUsageSelection(): UsageSelection | undefined {
+		const model = this.session.model;
+		const modelRegistry = this.session.modelRegistry;
+		if (!model || !modelRegistry?.isUsingOAuth(model)) return undefined;
+		const identity = modelRegistry.authStorage.getOAuthAccountIdentity(
+			model.provider,
+			this.session.sessionId,
+		);
+		if (!identity) return undefined;
+		return { provider: model.provider, modelId: model.id, identity };
+	}
+
+	#syncUsageSelection(): { selection: UsageSelection; key: string } | undefined {
+		const selection = this.#resolveUsageSelection();
+		const key = selection ? usageSelectionKey(selection) : null;
+		if (this.#usageSelectionKey !== key) {
+			this.#clearUsageStartTimer();
+			this.#cachedUsage = [];
+			this.#usageFetchedAt = 0;
+			this.#usageInFlightKey = null;
+			this.#usageSelectionKey = key;
+		}
+		return selection && key ? { selection, key } : undefined;
+	}
+
+	#isCurrentUsageTarget(target: UsageRefreshTarget): boolean {
+		if (this.#disposed || this.session !== target.session) return false;
+		const current = this.#resolveUsageSelection();
+		return current !== undefined && usageSelectionKey(current) === target.key;
+	}
+
 	/**
 	 * Startup redraws only arm a short-delayed task; timeout releases the render
 	 * cadence while a late successful fetch can still refresh the cached segment.
 	 */
 	refreshUsageInBackground(): void {
+		const current = this.#syncUsageSelection();
+		if (!current) return;
 		const now = Date.now();
-		if (this.#usageInFlight || this.#usageStartTimer) return;
+		if (this.#usageInFlightKey === current.key || this.#usageStartTimer) return;
 		if (this.#usageFetchedAt > 0 && now - this.#usageFetchedAt < 5 * 60_000) return;
 		const session = this.session;
-		const fetcher = (session as { fetchUsageReports?: (signal?: AbortSignal) => Promise<unknown> }).fetchUsageReports;
+		const fetcher = session.fetchUsageReports;
 		if (typeof fetcher !== "function") return;
-		this.#usageInFlight = true;
+		const target: UsageRefreshTarget = { session, ...current };
+		this.#usageInFlightKey = current.key;
 		this.#usageStartTimer = setTimeout(() => {
 			this.#usageStartTimer = null;
-			void this.#runUsageRefresh(session, fetcher);
+			void this.#runUsageRefresh(target, fetcher);
 		}, STATUS_USAGE_START_DELAY_MS);
 	}
 
-	async #runUsageRefresh(session: AgentSession, fetcher: (signal?: AbortSignal) => Promise<unknown>): Promise<void> {
-		if (this.#disposed || this.session !== session) {
-			this.#usageInFlight = false;
-			return;
-		}
+	async #runUsageRefresh(
+		target: UsageRefreshTarget,
+		fetcher: (signal?: AbortSignal) => Promise<UsageReport[] | null>,
+	): Promise<void> {
+		if (!this.#isCurrentUsageTarget(target)) return;
 		const signal = AbortSignal.timeout(STATUS_USAGE_REFRESH_TIMEOUT_MS);
-		let reportsPromise: Promise<unknown> | undefined;
+		let reportsPromise: Promise<UsageReport[] | null> | undefined;
 		try {
-			reportsPromise = fetcher.call(session, signal);
-			this.#applyUsageRefreshReports(session, await this.#raceUsageRefreshWithSignal(reportsPromise, signal));
+			reportsPromise = fetcher.call(target.session, signal);
+			this.#applyUsageRefreshReports(target, await this.#raceUsageRefreshWithSignal(reportsPromise, signal));
 		} catch {
-			if (this.session !== session) return;
+			if (!this.#isCurrentUsageTarget(target)) return;
 			this.#usageFetchedAt = Date.now();
 			if (signal.aborted && reportsPromise) {
-				this.#observeLateUsageRefresh(session, reportsPromise);
+				this.#observeLateUsageRefresh(target, reportsPromise);
 			}
 		} finally {
-			if (this.session === session) this.#usageInFlight = false;
+			if (this.#isCurrentUsageTarget(target)) this.#usageInFlightKey = null;
 		}
 	}
 
-	#applyUsageRefreshReports(session: AgentSession, reports: unknown): void {
-		if (this.#disposed || this.session !== session) return;
-		this.#cachedUsage = this.#normalizeUsageReports(reports);
+	#applyUsageRefreshReports(target: UsageRefreshTarget, reports: readonly UsageReport[] | null): void {
+		if (!this.#isCurrentUsageTarget(target)) return;
+		this.#cachedUsage = projectUsageLimits(reports, target.selection);
 		this.#usageFetchedAt = Date.now();
 	}
 
-	#observeLateUsageRefresh(session: AgentSession, reportsPromise: Promise<unknown>): void {
+	#observeLateUsageRefresh(
+		target: UsageRefreshTarget,
+		reportsPromise: Promise<UsageReport[] | null>,
+	): void {
 		void reportsPromise
 			.then(reports => {
-				this.#applyUsageRefreshReports(session, reports);
+				this.#applyUsageRefreshReports(target, reports);
 			})
 			.catch(() => {
-				if (this.#disposed || this.session !== session) return;
+				if (!this.#isCurrentUsageTarget(target)) return;
 				this.#usageFetchedAt = Date.now();
 			});
 	}
 
-	async #raceUsageRefreshWithSignal(promise: Promise<unknown>, signal: AbortSignal): Promise<unknown> {
+	async #raceUsageRefreshWithSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 		if (signal.aborted) throw signal.reason;
 		const aborted = Promise.withResolvers<never>();
 		const onAbort = () => aborted.reject(signal.reason);
@@ -597,49 +649,6 @@ export class StatusLineComponent implements Component {
 		} finally {
 			signal.removeEventListener("abort", onAbort);
 		}
-	}
-
-	#normalizeUsageReports(reports: unknown): {
-		fiveHour?: { percent: number; resetMinutes?: number };
-		sevenDay?: { percent: number; resetHours?: number };
-	} | null {
-		if (!Array.isArray(reports)) return null;
-		let fiveHour: { percent: number; resetMinutes?: number } | undefined;
-		let sevenDay: { percent: number; resetHours?: number } | undefined;
-		const now = Date.now();
-		for (const report of reports) {
-			if (!report || typeof report !== "object") continue;
-			const limits = (report as { limits?: unknown }).limits;
-			if (!Array.isArray(limits)) continue;
-			for (const limit of limits) {
-				if (!limit || typeof limit !== "object") continue;
-				const l = limit as {
-					scope?: { windowId?: string; tier?: string };
-					window?: { resetsAt?: number };
-					amount?: { usedFraction?: number };
-				};
-				const fraction = l.amount?.usedFraction;
-				if (typeof fraction !== "number") continue;
-				const windowId = l.scope?.windowId;
-				const tier = l.scope?.tier;
-				const resetsAt = l.window?.resetsAt;
-				if (windowId === "5h" && !tier && !fiveHour) {
-					fiveHour = {
-						percent: fraction * 100,
-						resetMinutes:
-							typeof resetsAt === "number" ? Math.max(0, Math.round((resetsAt - now) / 60_000)) : undefined,
-					};
-				} else if (windowId === "7d" && !tier && !sevenDay) {
-					sevenDay = {
-						percent: fraction * 100,
-						resetHours:
-							typeof resetsAt === "number" ? Math.max(0, Math.round((resetsAt - now) / 3_600_000)) : undefined,
-					};
-				}
-			}
-		}
-		if (!fiveHour && !sevenDay) return null;
-		return { fiveHour, sevenDay };
 	}
 
 	/**

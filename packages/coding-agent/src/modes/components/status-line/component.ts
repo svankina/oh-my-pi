@@ -164,9 +164,10 @@ const STATUS_USAGE_START_DELAY_MS = 0;
 const STATUS_USAGE_REFRESH_TIMEOUT_MS = 2_000;
 
 interface UsageRefreshTarget {
-	session: AgentSession;
-	selection: UsageSelection;
-	key: string;
+	readonly generation: number;
+	readonly session: AgentSession;
+	readonly selection: UsageSelection;
+	readonly key: string;
 }
 
 function hasContextSegment(segments: readonly StatusLineSegmentId[]): boolean {
@@ -222,7 +223,9 @@ export class StatusLineComponent implements Component {
 	// Usage caching (5-min TTL, keyed by model and active OAuth account)
 	#cachedUsage: readonly StatusLineUsageLimit[] = [];
 	#usageFetchedAt = 0;
-	#usageInFlightKey: string | null = null;
+	#usageRefreshGeneration = 0;
+	#usageLatestGeneration: number | null = null;
+	#usageInFlightTarget: UsageRefreshTarget | null = null;
 	#usageSelectionKey: string | null = null;
 	#usageStartTimer: Timer | null = null;
 	// Context-usage memo. The status line redraws on every agent event, so the
@@ -360,7 +363,8 @@ export class StatusLineComponent implements Component {
 		this.#clearUsageStartTimer();
 		this.#cachedUsage = [];
 		this.#usageFetchedAt = 0;
-		this.#usageInFlightKey = null;
+		this.#usageLatestGeneration = null;
+		this.#usageInFlightTarget = null;
 		this.#usageSelectionKey = null;
 		if (this.#gitWatcher) {
 			this.#gitWatcher.close();
@@ -381,7 +385,8 @@ export class StatusLineComponent implements Component {
 		this.#clearUsageStartTimer();
 		this.#cachedUsage = [];
 		this.#usageFetchedAt = 0;
-		this.#usageInFlightKey = null;
+		this.#usageLatestGeneration = null;
+		this.#usageInFlightTarget = null;
 		this.#usageSelectionKey = null;
 		this.#contextUsageCache = undefined;
 		this.#lastTokensPerSecond = null;
@@ -565,14 +570,21 @@ export class StatusLineComponent implements Component {
 			this.#clearUsageStartTimer();
 			this.#cachedUsage = [];
 			this.#usageFetchedAt = 0;
-			this.#usageInFlightKey = null;
+			this.#usageLatestGeneration = null;
+			this.#usageInFlightTarget = null;
 			this.#usageSelectionKey = key;
 		}
 		return selection && key ? { selection, key } : undefined;
 	}
 
-	#isCurrentUsageTarget(target: UsageRefreshTarget): boolean {
-		if (this.#disposed || this.session !== target.session) return false;
+	#isLatestUsageTarget(target: UsageRefreshTarget): boolean {
+		if (
+			this.#disposed ||
+			this.session !== target.session ||
+			this.#usageLatestGeneration !== target.generation
+		) {
+			return false;
+		}
 		const current = this.#resolveUsageSelection();
 		return current !== undefined && usageSelectionKey(current) === target.key;
 	}
@@ -585,13 +597,18 @@ export class StatusLineComponent implements Component {
 		const current = this.#syncUsageSelection();
 		if (!current) return;
 		const now = Date.now();
-		if (this.#usageInFlightKey === current.key || this.#usageStartTimer) return;
+		if (this.#usageInFlightTarget || this.#usageStartTimer) return;
 		if (this.#usageFetchedAt > 0 && now - this.#usageFetchedAt < 5 * 60_000) return;
 		const session = this.session;
 		const fetcher = session.fetchUsageReports;
 		if (typeof fetcher !== "function") return;
-		const target: UsageRefreshTarget = { session, ...current };
-		this.#usageInFlightKey = current.key;
+		const target: UsageRefreshTarget = {
+			generation: ++this.#usageRefreshGeneration,
+			session,
+			...current,
+		};
+		this.#usageLatestGeneration = target.generation;
+		this.#usageInFlightTarget = target;
 		this.#usageStartTimer = setTimeout(() => {
 			this.#usageStartTimer = null;
 			void this.#runUsageRefresh(target, fetcher);
@@ -602,25 +619,25 @@ export class StatusLineComponent implements Component {
 		target: UsageRefreshTarget,
 		fetcher: (signal?: AbortSignal) => Promise<UsageReport[] | null>,
 	): Promise<void> {
-		if (!this.#isCurrentUsageTarget(target)) return;
+		if (!this.#isLatestUsageTarget(target)) return;
 		const signal = AbortSignal.timeout(STATUS_USAGE_REFRESH_TIMEOUT_MS);
 		let reportsPromise: Promise<UsageReport[] | null> | undefined;
 		try {
 			reportsPromise = fetcher.call(target.session, signal);
 			this.#applyUsageRefreshReports(target, await this.#raceUsageRefreshWithSignal(reportsPromise, signal));
 		} catch {
-			if (!this.#isCurrentUsageTarget(target)) return;
+			if (!this.#isLatestUsageTarget(target)) return;
 			this.#usageFetchedAt = Date.now();
 			if (signal.aborted && reportsPromise) {
 				this.#observeLateUsageRefresh(target, reportsPromise);
 			}
 		} finally {
-			if (this.#isCurrentUsageTarget(target)) this.#usageInFlightKey = null;
+			if (this.#usageInFlightTarget === target) this.#usageInFlightTarget = null;
 		}
 	}
 
 	#applyUsageRefreshReports(target: UsageRefreshTarget, reports: readonly UsageReport[] | null): void {
-		if (!this.#isCurrentUsageTarget(target)) return;
+		if (!this.#isLatestUsageTarget(target)) return;
 		this.#cachedUsage = projectUsageLimits(reports, target.selection);
 		this.#usageFetchedAt = Date.now();
 	}
@@ -634,7 +651,7 @@ export class StatusLineComponent implements Component {
 				this.#applyUsageRefreshReports(target, reports);
 			})
 			.catch(() => {
-				if (!this.#isCurrentUsageTarget(target)) return;
+				if (!this.#isLatestUsageTarget(target)) return;
 				this.#usageFetchedAt = Date.now();
 			});
 	}

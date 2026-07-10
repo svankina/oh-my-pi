@@ -1,4 +1,4 @@
-import { resolveUsedFraction, type UsageReport } from "@oh-my-pi/pi-ai";
+import { resolveUsedFraction, type UsageLimit, type UsageReport } from "@oh-my-pi/pi-ai";
 import type { OAuthAccountIdentity } from "../../../session/auth-storage";
 import { limitMatchesActiveAccount } from "../../../slash-commands/helpers/active-oauth-account";
 
@@ -21,6 +21,19 @@ function normalized(value: string | undefined): string {
 	return value?.trim().toLowerCase() ?? "";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isUsageAmount(value: unknown): value is UsageLimit["amount"] {
+	if (!isRecord(value) || typeof value.unit !== "string") return false;
+	for (const field of ["used", "limit", "remaining", "usedFraction", "remainingFraction"] as const) {
+		const amount = value[field];
+		if (amount !== undefined && (typeof amount !== "number" || !Number.isFinite(amount))) return false;
+	}
+	return true;
+}
+
 export function usageSelectionKey(selection: UsageSelection): string {
 	const { identity } = selection;
 	return [
@@ -36,25 +49,60 @@ export function projectUsageLimits(
 	reports: readonly UsageReport[] | null | undefined,
 	selection: UsageSelection,
 ): StatusLineUsageLimit[] {
+	if (!Array.isArray(reports)) return [];
 	const projected: StatusLineUsageLimit[] = [];
 	const seen = new Set<string>();
-	for (const report of reports ?? []) {
-		if (report.provider !== selection.provider) continue;
-		for (const limit of report.limits) {
+	for (const reportValue of reports as readonly unknown[]) {
+		if (
+			!isRecord(reportValue) ||
+			typeof reportValue.provider !== "string" ||
+			!reportValue.provider.trim() ||
+			!Array.isArray(reportValue.limits) ||
+			reportValue.provider !== selection.provider
+		) {
+			continue;
+		}
+		const report = reportValue as unknown as UsageReport;
+		for (const limitValue of reportValue.limits as readonly unknown[]) {
+			if (!isRecord(limitValue) || typeof limitValue.id !== "string" || !limitValue.id.trim()) continue;
+			if (!isRecord(limitValue.scope) || !isUsageAmount(limitValue.amount)) continue;
+			const scope = limitValue.scope;
+			if (typeof scope.provider !== "string" || !scope.provider.trim()) continue;
+			let validScope = true;
+			for (const field of ["accountId", "projectId", "orgId", "modelId", "tier", "windowId"] as const) {
+				if (scope[field] !== undefined && typeof scope[field] !== "string") {
+					validScope = false;
+					break;
+				}
+			}
+			if (!validScope || (scope.shared !== undefined && typeof scope.shared !== "boolean")) continue;
+
+			const window = isRecord(limitValue.window) ? limitValue.window : undefined;
+			const windowLabel =
+				typeof window?.label === "string" && window.label.trim().length > 0 ? window.label : undefined;
+			const limitLabel =
+				typeof limitValue.label === "string" && limitValue.label.trim().length > 0 ? limitValue.label : undefined;
+			const label = windowLabel ?? limitLabel;
+			if (!label) continue;
+
+			const limit = limitValue as unknown as UsageLimit;
 			if (seen.has(limit.id)) continue;
 			if (!limitMatchesActiveAccount(report, limit, selection.identity)) continue;
-			if (limit.scope.modelId && limit.scope.modelId !== selection.modelId) continue;
+			if (limit.scope.modelId && normalized(limit.scope.modelId) !== normalized(selection.modelId)) continue;
 			const usedFraction = resolveUsedFraction(limit);
 			if (usedFraction === undefined || !Number.isFinite(usedFraction)) continue;
 			seen.add(limit.id);
-			projected.push({
+			const item: StatusLineUsageLimit = {
 				id: limit.id,
-				label: limit.window?.label || limit.label,
+				label,
 				usedFraction,
-				resetsAt: limit.window?.resetsAt,
 				tier: limit.scope.tier,
 				modelId: limit.scope.modelId,
-			});
+			};
+			if (typeof window?.resetsAt === "number" && Number.isFinite(window.resetsAt)) {
+				item.resetsAt = window.resetsAt;
+			}
+			projected.push(item);
 		}
 	}
 	// Disambiguate duplicate labels with tier first, then model ID, without

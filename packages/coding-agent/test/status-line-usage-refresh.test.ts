@@ -14,6 +14,7 @@ async function flushMicrotasks(): Promise<void> {
 interface MutableUsageSession {
 	session: AgentSession;
 	readonly identityLookups: Array<readonly [provider: string, sessionId: string | undefined]>;
+	readonly legacyIdentityLookups: Array<readonly [provider: string, sessionId: string | undefined]>;
 	setModel(provider: string, id: string): void;
 	setIdentity(identity: { accountId?: string; email?: string; projectId?: string } | undefined): void;
 }
@@ -28,6 +29,7 @@ function makeSession(fetchUsageReports: (signal?: AbortSignal) => Promise<UsageR
 		accountId: "anthropic-a",
 	};
 	const identityLookups: Array<readonly [provider: string, sessionId: string | undefined]> = [];
+	const legacyIdentityLookups: Array<readonly [provider: string, sessionId: string | undefined]> = [];
 	const session = {
 		fetchUsageReports,
 		messages,
@@ -39,8 +41,12 @@ function makeSession(fetchUsageReports: (signal?: AbortSignal) => Promise<UsageR
 		modelRegistry: {
 			isUsingOAuth: () => identity !== undefined,
 			authStorage: {
-				getOAuthAccountIdentity: (provider: string, sessionId?: string) => {
+				getSessionOAuthAccountIdentity: (provider: string, sessionId: string) => {
 					identityLookups.push([provider, sessionId]);
+					return identity;
+				},
+				getOAuthAccountIdentity: (provider: string, sessionId?: string) => {
+					legacyIdentityLookups.push([provider, sessionId]);
 					return identity;
 				},
 			},
@@ -64,6 +70,7 @@ function makeSession(fetchUsageReports: (signal?: AbortSignal) => Promise<UsageR
 	return {
 		session,
 		identityLookups,
+		legacyIdentityLookups,
 		setModel(provider, id) {
 			state.model = { provider, id, contextWindow: 200_000 };
 		},
@@ -169,6 +176,7 @@ describe("StatusLineComponent usage refresh", () => {
 				([provider, sessionId]) => provider === "openai-codex" && sessionId === "status-line-test",
 			),
 		).toBe(true);
+		expect(harness.legacyIdentityLookups).toEqual([]);
 	});
 
 
@@ -427,6 +435,206 @@ describe("StatusLineComponent usage refresh", () => {
 		await flushMicrotasks();
 	});
 
+
+	it("releases a queued A target rejected during a transient A to B to A transition", async () => {
+		let calls = 0;
+		const harness = makeSession(async () => {
+			calls++;
+			return [];
+		});
+		const component = new StatusLineComponent(harness.session);
+
+		component.refreshUsageInBackground();
+		expect(calls).toBe(0);
+
+		harness.setIdentity({ accountId: "anthropic-b" });
+		vi.advanceTimersByTime(0);
+		await flushMicrotasks();
+		expect(calls).toBe(0);
+
+		harness.setIdentity({ accountId: "anthropic-a" });
+		component.refreshUsageInBackground();
+		vi.advanceTimersByTime(0);
+		await flushMicrotasks();
+		expect(calls).toBe(1);
+	});
+
+	it("renders and caches valid limits after malformed runtime entries", async () => {
+		let calls = 0;
+		const reports = [
+			null,
+			{ provider: "anthropic" },
+			{
+				provider: "anthropic",
+				fetchedAt: Date.now(),
+				metadata: { accountId: "anthropic-a" },
+				limits: [
+					{
+						id: "bad-amount",
+						label: "Bad amount",
+						scope: { provider: "anthropic", accountId: "anthropic-a" },
+						amount: null,
+					},
+				],
+			},
+			...usageReport("anthropic", "anthropic-a", "Valid monthly window", 42),
+		] as unknown as UsageReport[];
+		const component = new StatusLineComponent(
+			makeSession(async () => {
+				calls++;
+				return reports;
+			}).session,
+		);
+		component.updateSettings({
+			preset: "custom",
+			leftSegments: ["usage"],
+			rightSegments: [],
+			separator: "powerline-thin",
+		});
+
+		component.getTopBorder(80);
+		vi.advanceTimersByTime(0);
+		await flushMicrotasks();
+
+		expect(plain(component.getTopBorder(80).content)).toContain("Valid monthly window 42%");
+		expect(component.getTopBorder(12).width).toBeLessThanOrEqual(12);
+		vi.advanceTimersByTime(0);
+		await flushMicrotasks();
+		expect(calls).toBe(1);
+	});
+
+	it("does no identity lookup or usage fetch when usage is not configured", async () => {
+		let calls = 0;
+		const harness = makeSession(async () => {
+			calls++;
+			return usageReport("anthropic", "anthropic-a", "Hidden", 42);
+		});
+		const component = new StatusLineComponent(harness.session);
+		component.updateSettings({
+			preset: "custom",
+			leftSegments: ["session_name"],
+			rightSegments: [],
+			separator: "powerline-thin",
+		});
+
+		component.getTopBorder(80);
+		vi.advanceTimersByTime(0);
+		await flushMicrotasks();
+
+		expect(harness.identityLookups).toEqual([]);
+		expect(harness.legacyIdentityLookups).toEqual([]);
+		expect(calls).toBe(0);
+	});
+
+	it("ignores pending usage success after dispose", async () => {
+		const pending = Promise.withResolvers<UsageReport[] | null>();
+		const component = new StatusLineComponent(makeSession(() => pending.promise).session);
+		component.updateSettings({
+			preset: "custom",
+			leftSegments: ["usage"],
+			rightSegments: [],
+			separator: "powerline-thin",
+		});
+
+		component.refreshUsageInBackground();
+		vi.advanceTimersByTime(0);
+		await flushMicrotasks();
+		component.dispose();
+		pending.resolve(usageReport("anthropic", "anthropic-a", "Disposed", 88));
+		await flushMicrotasks();
+
+		expect(plain(component.getTopBorder(80).content)).not.toContain("Disposed");
+	});
+
+	it("observes pending usage rejection after dispose without rendering", async () => {
+		const pending = Promise.withResolvers<UsageReport[] | null>();
+		const component = new StatusLineComponent(makeSession(() => pending.promise).session);
+		component.updateSettings({
+			preset: "custom",
+			leftSegments: ["usage"],
+			rightSegments: [],
+			separator: "powerline-thin",
+		});
+
+		component.refreshUsageInBackground();
+		vi.advanceTimersByTime(0);
+		await flushMicrotasks();
+		component.dispose();
+		pending.reject(new Error("disposed request"));
+		await flushMicrotasks();
+
+		expect(plain(component.getTopBorder(80).content)).not.toContain("%");
+	});
+
+	it("lets a replacement session fetch immediately and ignores the old pending success", async () => {
+		const oldPending = Promise.withResolvers<UsageReport[] | null>();
+		let oldCalls = 0;
+		const oldSession = makeSession(() => {
+			oldCalls++;
+			return oldPending.promise;
+		});
+		let replacementCalls = 0;
+		const replacement = makeSession(async () => {
+			replacementCalls++;
+			return usageReport("anthropic", "anthropic-a", "Replacement", 22);
+		});
+		const component = new StatusLineComponent(oldSession.session);
+		component.updateSettings({
+			preset: "custom",
+			leftSegments: ["usage"],
+			rightSegments: [],
+			separator: "powerline-thin",
+		});
+
+		component.refreshUsageInBackground();
+		vi.advanceTimersByTime(0);
+		await flushMicrotasks();
+		component.setSession(replacement.session);
+		component.getTopBorder(80);
+		vi.advanceTimersByTime(0);
+		await flushMicrotasks();
+
+		expect(oldCalls).toBe(1);
+		expect(replacementCalls).toBe(1);
+		expect(plain(component.getTopBorder(80).content)).toContain("Replacement 22%");
+
+		oldPending.resolve(usageReport("anthropic", "anthropic-a", "Old session", 88));
+		await flushMicrotasks();
+		const text = plain(component.getTopBorder(80).content);
+		expect(text).toContain("Replacement 22%");
+		expect(text).not.toContain("Old session");
+	});
+
+	it("lets a replacement session fetch immediately and ignores the old pending rejection", async () => {
+		const oldPending = Promise.withResolvers<UsageReport[] | null>();
+		const oldSession = makeSession(() => oldPending.promise);
+		let replacementCalls = 0;
+		const replacement = makeSession(async () => {
+			replacementCalls++;
+			return usageReport("anthropic", "anthropic-a", "Replacement", 22);
+		});
+		const component = new StatusLineComponent(oldSession.session);
+		component.updateSettings({
+			preset: "custom",
+			leftSegments: ["usage"],
+			rightSegments: [],
+			separator: "powerline-thin",
+		});
+
+		component.refreshUsageInBackground();
+		vi.advanceTimersByTime(0);
+		await flushMicrotasks();
+		component.setSession(replacement.session);
+		component.getTopBorder(80);
+		vi.advanceTimersByTime(0);
+		await flushMicrotasks();
+		expect(plain(component.getTopBorder(80).content)).toContain("Replacement 22%");
+
+		oldPending.reject(new Error("old session"));
+		await flushMicrotasks();
+		expect(plain(component.getTopBorder(80).content)).toContain("Replacement 22%");
+		expect(replacementCalls).toBe(1);
+	});
 
 	it("does not fetch or render limits without an active OAuth identity", async () => {
 		let calls = 0;

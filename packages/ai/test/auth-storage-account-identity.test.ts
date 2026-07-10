@@ -111,6 +111,62 @@ describe("AuthStorage.getOAuthAccountIdentity", () => {
 		expect(rotatedIdentity?.accountId).toBe(retryKey === "access-a" ? "acc-a" : "acc-b");
 	});
 
+	test("strict session lookup stays hidden for fresh mixed API-key and OAuth credentials", async () => {
+		if (!authStorage) throw new Error("test setup failed");
+		const sessionId = "session-mixed-credentials";
+		await authStorage.set(PROVIDER, [
+			{ type: "api_key", key: "stored-api-key" },
+			{
+				type: "oauth",
+				access: "access-a",
+				refresh: "refresh-a",
+				expires: Date.now() + 60 * 60_000,
+				accountId: "acc-a",
+				email: "a@example.com",
+			},
+		]);
+
+		expect(authStorage.getSessionOAuthAccountIdentity(PROVIDER, sessionId)).toBeUndefined();
+		expect(await authStorage.getApiKey(PROVIDER, sessionId)).toBe("stored-api-key");
+		expect(authStorage.getSessionOAuthAccountIdentity(PROVIDER, sessionId)).toBeUndefined();
+	});
+
+	test("strict session lookup reveals only the OAuth identity established by routing", async () => {
+		if (!authStorage) throw new Error("test setup failed");
+		const sessionId = "session-multi-oauth";
+		await authStorage.set(PROVIDER, [
+			{
+				type: "oauth",
+				access: "access-a",
+				refresh: "refresh-a",
+				expires: Date.now() + 60 * 60_000,
+				accountId: "acc-a",
+				email: "a@example.com",
+			},
+			{
+				type: "oauth",
+				access: "access-b",
+				refresh: "refresh-b",
+				expires: Date.now() + 60 * 60_000,
+				accountId: "acc-b",
+				email: "b@example.com",
+			},
+		]);
+		vi.spyOn(oauthUtils, "getOAuthApiKey").mockImplementation(async (provider, credentials) => {
+			const credential = credentials[provider];
+			if (!credential) return null;
+			return { newCredentials: credential, apiKey: credential.access };
+		});
+
+		expect(authStorage.getSessionOAuthAccountIdentity(PROVIDER, sessionId)).toBeUndefined();
+		const routedKey = await authStorage.getApiKey(PROVIDER, sessionId);
+		expect(authStorage.getSessionOAuthAccountIdentity(PROVIDER, sessionId)).toEqual(
+			routedKey === "access-a"
+				? { accountId: "acc-a", email: "a@example.com" }
+				: { accountId: "acc-b", email: "b@example.com" },
+		);
+	});
+
 	test("config override suppresses OAuth identity attribution", async () => {
 		if (!authStorage) throw new Error("test setup failed");
 		await authStorage.set(PROVIDER, [

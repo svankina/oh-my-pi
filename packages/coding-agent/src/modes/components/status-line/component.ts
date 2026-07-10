@@ -173,6 +173,9 @@ interface UsageRefreshTarget {
 function hasContextSegment(segments: readonly StatusLineSegmentId[]): boolean {
 	return segments.includes("context_pct") || segments.includes("context_total");
 }
+function hasUsageSegment(segments: readonly StatusLineSegmentId[]): boolean {
+	return segments.includes("usage");
+}
 function hasGitSegment(segments: readonly StatusLineSegmentId[]): boolean {
 	return segments.includes("git");
 }
@@ -554,8 +557,8 @@ export class StatusLineComponent implements Component {
 	#resolveUsageSelection(): UsageSelection | undefined {
 		const model = this.session.model;
 		const modelRegistry = this.session.modelRegistry;
-		if (!model || !modelRegistry?.isUsingOAuth(model)) return undefined;
-		const identity = modelRegistry.authStorage.getOAuthAccountIdentity(
+		if (!model || !modelRegistry) return undefined;
+		const identity = modelRegistry.authStorage.getSessionOAuthAccountIdentity(
 			model.provider,
 			this.session.sessionId,
 		);
@@ -619,16 +622,17 @@ export class StatusLineComponent implements Component {
 		target: UsageRefreshTarget,
 		fetcher: (signal?: AbortSignal) => Promise<UsageReport[] | null>,
 	): Promise<void> {
-		if (!this.#isLatestUsageTarget(target)) return;
-		const signal = AbortSignal.timeout(STATUS_USAGE_REFRESH_TIMEOUT_MS);
+		let signal: AbortSignal | undefined;
 		let reportsPromise: Promise<UsageReport[] | null> | undefined;
 		try {
+			if (!this.#isLatestUsageTarget(target)) return;
+			signal = AbortSignal.timeout(STATUS_USAGE_REFRESH_TIMEOUT_MS);
 			reportsPromise = fetcher.call(target.session, signal);
 			this.#applyUsageRefreshReports(target, await this.#raceUsageRefreshWithSignal(reportsPromise, signal));
 		} catch {
 			if (!this.#isLatestUsageTarget(target)) return;
 			this.#usageFetchedAt = Date.now();
-			if (signal.aborted && reportsPromise) {
+			if (signal?.aborted && reportsPromise) {
 				this.#observeLateUsageRefresh(target, reportsPromise);
 			}
 		} finally {
@@ -729,13 +733,14 @@ export class StatusLineComponent implements Component {
 		width: number,
 		segmentOptions: StatusLineSettings["segmentOptions"],
 		includeContext: boolean,
+		includeUsage: boolean,
 		includeGit: boolean,
 		includePr: boolean,
 	): SegmentContext {
 		const state = this.session.state;
 
-		// Trigger background fetch (5-min TTL); render uses cached value
-		this.refreshUsageInBackground();
+		// Trigger background fetch (5-min TTL) only when the segment can render.
+		if (includeUsage) this.refreshUsageInBackground();
 
 		// Get usage statistics
 		const aggregateUsageStats = this.session.sessionManager?.getUsageStatistics() ?? {
@@ -840,6 +845,8 @@ export class StatusLineComponent implements Component {
 		const effectiveSettings = this.#resolveSettings();
 		const includeContext =
 			hasContextSegment(effectiveSettings.leftSegments) || hasContextSegment(effectiveSettings.rightSegments);
+		const includeUsage =
+			hasUsageSegment(effectiveSettings.leftSegments) || hasUsageSegment(effectiveSettings.rightSegments);
 		const gitEnabled = this.#gitEnabled();
 		const includeGit =
 			gitEnabled &&
@@ -850,6 +857,7 @@ export class StatusLineComponent implements Component {
 			width,
 			effectiveSettings.segmentOptions,
 			includeContext,
+			includeUsage,
 			includeGit,
 			includePr,
 		);

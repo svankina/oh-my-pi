@@ -45,9 +45,8 @@ The status line derives a selection key from the current session:
 
 1. Read the selected model from `session.state.model`, falling back to `session.model` only where the status line already does so.
 2. Use the model's `provider` and `id`.
-3. Confirm that `session.modelRegistry.isUsingOAuth(model)` is true.
-4. Resolve the session-sticky OAuth identity with `session.modelRegistry.authStorage.getOAuthAccountIdentity(provider, sessionId)`.
-5. Canonicalize the available `accountId`, `email`, and `projectId` fields into the key.
+3. Resolve the strict session-sticky OAuth identity with `session.modelRegistry.authStorage.getSessionOAuthAccountIdentity(provider, sessionId)`. This read-only lookup returns an identity only after routing has established an OAuth sticky credential; it never falls back, ranks, or routes credentials.
+4. Canonicalize the available `accountId`, `email`, and `projectId` fields into the key.
 
 If the model is absent, the selected credential is not OAuth, or no active OAuth identity is available, the usage selection is unavailable. The segment clears its cached display and stays hidden.
 

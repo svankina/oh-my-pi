@@ -110,6 +110,93 @@ describe("projectUsageLimits", () => {
 			usageSelectionKey({ ...SELECTION, identity: { accountId: " ACCOUNT-A ", email: "A@EXAMPLE.COM" } }),
 		);
 	});
+
+	it("matches real Codex Spark model scope casing", () => {
+		const selection = { ...SELECTION, modelId: "gpt-5.3-codex-spark" };
+		const reports = [
+			report("openai-codex", "account-a", [
+				limit("spark", "Spark", 0.37, {
+					scope: {
+						provider: "openai-codex",
+						accountId: "account-a",
+						modelId: "GPT-5.3-Codex-Spark",
+					},
+				}),
+			]),
+		];
+
+		expect(projectUsageLimits(reports, selection).map(item => item.id)).toEqual(["spark"]);
+	});
+
+	it("skips malformed runtime entries and continues projecting later valid limits", () => {
+		const reports = [
+			null,
+			{ provider: "openai-codex" },
+			{ provider: 42, limits: [] },
+			{
+				provider: "openai-codex",
+				fetchedAt: Date.now(),
+				metadata: { accountId: "account-a" },
+				limits: [
+					null,
+					{
+						id: 42,
+						label: "Bad ID",
+						scope: { provider: "openai-codex", accountId: "account-a" },
+						amount: { unit: "percent", usedFraction: 0.1 },
+					},
+					{
+						id: "bad-label",
+						label: 42,
+						scope: { provider: "openai-codex", accountId: "account-a" },
+						amount: { unit: "percent", usedFraction: 0.2 },
+					},
+					{
+						id: "bad-scope",
+						label: "Bad scope",
+						scope: null,
+						amount: { unit: "percent", usedFraction: 0.3 },
+					},
+					{
+						id: "bad-amount",
+						label: "Bad amount",
+						scope: { provider: "openai-codex", accountId: "account-a" },
+						amount: null,
+					},
+					{
+						id: "non-finite-fraction",
+						label: "Non-finite",
+						scope: { provider: "openai-codex", accountId: "account-a" },
+						amount: { unit: "percent", usedFraction: Number.POSITIVE_INFINITY },
+					},
+					{
+						id: "bad-reset",
+						label: "Fallback label",
+						scope: { provider: "openai-codex", accountId: "account-a" },
+						window: {
+							id: "bad-reset",
+							label: "Window label",
+							resetsAt: Number.POSITIVE_INFINITY,
+						},
+						amount: { unit: "percent", usedFraction: 0.4 },
+					},
+					limit("valid", "Valid", 0.5),
+				],
+			},
+		] as unknown as UsageReport[];
+
+		expect(projectUsageLimits(reports, SELECTION)).toEqual([
+			{
+				id: "bad-reset",
+				label: "Window label",
+				usedFraction: 0.4,
+				tier: undefined,
+				modelId: undefined,
+			},
+			expect.objectContaining({ id: "valid", label: "Valid", usedFraction: 0.5 }),
+		]);
+	});
+
 });
 
 beforeAll(async () => {
@@ -157,4 +244,15 @@ it("formats reset countdowns below an hour and at day/hour boundaries", () => {
 	} finally {
 		setSystemTime();
 	}
+});
+
+it("sanitizes ANSI and control characters in usage labels", () => {
+	const ctx = {
+		usage: [{ id: "unsafe", label: "\u001b[31mDanger\u001b[0m\nNext\u0007", usedFraction: 0.42 }],
+	} as unknown as SegmentContext;
+
+	const text = stripVTControlCharacters(renderSegment("usage", ctx).content);
+	expect(text).toContain("Danger Next 42%");
+	expect(text).not.toContain("\n");
+	expect(text).not.toContain("\u0007");
 });

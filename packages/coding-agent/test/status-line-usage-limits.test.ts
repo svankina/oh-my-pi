@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it, setSystemTime } from "bun:test";
 import type { UsageLimit, UsageReport } from "@oh-my-pi/pi-ai";
 import { renderSegment } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/segments";
 import type { SegmentContext } from "@oh-my-pi/pi-coding-agent/modes/components/status-line/types";
@@ -36,7 +36,11 @@ describe("projectUsageLimits", () => {
 	it("keeps only the selected provider, active account, and applicable model scopes", () => {
 		const reports = [
 			report("anthropic", "account-a", [limit("claude-5h", "5h", 0.91)]),
-			report("openai-codex", "account-b", [limit("other-account", "5h", 0.82)]),
+			report("openai-codex", "account-b", [
+				limit("other-account", "5h", 0.82, {
+					scope: { provider: "openai-codex", accountId: "account-b" },
+				}),
+			]),
 			report("openai-codex", "account-a", [
 				limit("shared", "5h", 0.42),
 				limit("selected-model", "Daily", 0.18, {
@@ -52,6 +56,19 @@ describe("projectUsageLimits", () => {
 			["shared", 0.42],
 			["selected-model", 0.18],
 		]);
+	});
+
+	it("keeps limits whose scope matches the active account when report metadata differs", () => {
+		const reports = [
+			report("openai-codex", "account-a", [
+				limit("merged-account-b", "Daily", 0.31, {
+					scope: { provider: "openai-codex", accountId: "account-b" },
+				}),
+			]),
+		];
+		const selection = { ...SELECTION, identity: { accountId: "account-b" } };
+
+		expect(projectUsageLimits(reports, selection).map(item => item.id)).toEqual(["merged-account-b"]);
 	});
 
 	it("deduplicates stable IDs and resolves non-explicit fractions", () => {
@@ -99,19 +116,45 @@ beforeAll(async () => {
 	await initTheme();
 });
 
-it("renders arbitrary normalized windows and reset countdowns", () => {
+it("renders arbitrary normalized windows and clamps over-limit usage", () => {
 	const ctx = {
 		usage: [
-			{ id: "daily", label: "Daily", usedFraction: 0.18, resetsAt: Date.now() + 60 * 60_000 },
+			{ id: "daily", label: "Daily", usedFraction: 0.18 },
 			{ id: "monthly", label: "Monthly", usedFraction: 0.54 },
 			{ id: "burst", label: "Burst", usedFraction: 1.2 },
 		],
 	} as unknown as SegmentContext;
 
 	const text = stripVTControlCharacters(renderSegment("usage", ctx).content);
-	expect(text).toContain("Daily 18% (1h)");
+	expect(text).toContain("Daily 18%");
 	expect(text).toContain("Monthly 54%");
 	expect(text).toContain("Burst 100%");
 	expect(text).not.toContain("5h");
 	expect(text).not.toContain("7d");
+});
+
+it("formats reset countdowns below an hour and at day/hour boundaries", () => {
+	const now = new Date("2026-01-02T03:04:05.000Z");
+	setSystemTime(now);
+	try {
+		const ctx = {
+			usage: [
+				{ id: "short", label: "Short", usedFraction: 0.18, resetsAt: now.getTime() + 45 * 60_000 },
+				{ id: "one-day", label: "One day", usedFraction: 0.54, resetsAt: now.getTime() + 24 * 3_600_000 },
+				{
+					id: "multi-day",
+					label: "Multi-day",
+					usedFraction: 0.72,
+					resetsAt: now.getTime() + 51 * 3_600_000,
+				},
+			],
+		} as unknown as SegmentContext;
+
+		const text = stripVTControlCharacters(renderSegment("usage", ctx).content);
+		expect(text).toContain("Short 18% (45m)");
+		expect(text).toContain("One day 54% (1d)");
+		expect(text).toContain("Multi-day 72% (2d 3h)");
+	} finally {
+		setSystemTime();
+	}
 });

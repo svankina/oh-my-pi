@@ -40,14 +40,6 @@ export function projectUsageLimits(
 	const seen = new Set<string>();
 	for (const report of reports ?? []) {
 		if (report.provider !== selection.provider) continue;
-		const reportAccountId =
-			typeof report.metadata?.accountId === "string"
-				? report.metadata.accountId
-				: typeof report.metadata?.account_id === "string"
-					? report.metadata.account_id
-					: undefined;
-		const selectedAccountId = normalized(selection.identity.accountId);
-		if (reportAccountId && selectedAccountId && normalized(reportAccountId) !== selectedAccountId) continue;
 		for (const limit of report.limits) {
 			if (seen.has(limit.id)) continue;
 			if (!limitMatchesActiveAccount(report, limit, selection.identity)) continue;

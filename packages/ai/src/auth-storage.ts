@@ -1932,17 +1932,36 @@ export class AuthStorage {
 	 * metadata paths; it does not refresh tokens, rank usage, or advance selection.
 	 */
 	getOAuthAccountIdentity(provider: string, sessionId?: string): OAuthAccountIdentity | undefined {
-		const preferred = this.#resolveActiveOAuthCredential(provider, sessionId);
-		if (!preferred) return undefined;
+		return this.#toOAuthAccountIdentity(this.#resolveActiveOAuthCredential(provider, sessionId));
+	}
+
+	/**
+	 * Get the OAuth identity already routed to this exact session.
+	 *
+	 * Unlike {@link getOAuthAccountIdentity}, this strict read-only lookup never
+	 * falls back to another stored OAuth credential and never ranks or routes
+	 * credentials. A fresh session and a session routed to an API key both
+	 * return `undefined`.
+	 */
+	getSessionOAuthAccountIdentity(provider: string, sessionId: string): OAuthAccountIdentity | undefined {
+		if (this.#runtimeOverrides.has(provider) || this.#configOverrides.has(provider)) return undefined;
+		const sessionCredential = this.#getSessionCredential(provider, sessionId);
+		if (sessionCredential?.type !== "oauth") return undefined;
+		const credential = this.#getCredentialsForProvider(provider)[sessionCredential.index];
+		return this.#toOAuthAccountIdentity(credential?.type === "oauth" ? credential : undefined);
+	}
+
+	#toOAuthAccountIdentity(credential: OAuthCredential | undefined): OAuthAccountIdentity | undefined {
+		if (!credential) return undefined;
 		const identity: OAuthAccountIdentity = {};
-		if (typeof preferred.accountId === "string" && preferred.accountId.length > 0) {
-			identity.accountId = preferred.accountId;
+		if (typeof credential.accountId === "string" && credential.accountId.length > 0) {
+			identity.accountId = credential.accountId;
 		}
-		if (typeof preferred.email === "string" && preferred.email.length > 0) {
-			identity.email = preferred.email;
+		if (typeof credential.email === "string" && credential.email.length > 0) {
+			identity.email = credential.email;
 		}
-		if (typeof preferred.projectId === "string" && preferred.projectId.length > 0) {
-			identity.projectId = preferred.projectId;
+		if (typeof credential.projectId === "string" && credential.projectId.length > 0) {
+			identity.projectId = credential.projectId;
 		}
 		if (!identity.accountId && !identity.email && !identity.projectId) return undefined;
 		return identity;

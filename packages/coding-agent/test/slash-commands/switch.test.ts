@@ -30,7 +30,7 @@ describe("/model slash command", () => {
 });
 
 describe("/mod slash command", () => {
-	it("opens the compact directory-default subscription selector", async () => {
+	it("opens the directory-default model selector", async () => {
 		const harness = createRuntime();
 
 		const handled = await executeBuiltinSlashCommand("/mod", harness.runtime);

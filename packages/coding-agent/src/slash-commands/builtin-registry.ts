@@ -350,7 +350,7 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	},
 	{
 		name: "mod",
-		description: "Fuzzy-pick a subscribed model for this directory",
+		description: "Set the default model for this directory",
 		handleTui: (_command, runtime) => {
 			runtime.ctx.showModelSelector({ projectOnly: true });
 			runtime.ctx.editor.setText("");

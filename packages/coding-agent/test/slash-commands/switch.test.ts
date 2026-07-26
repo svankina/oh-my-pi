@@ -29,6 +29,18 @@ describe("/model slash command", () => {
 	});
 });
 
+describe("/mod slash command", () => {
+	it("opens the directory-default model selector", async () => {
+		const harness = createRuntime();
+
+		const handled = await executeBuiltinSlashCommand("/mod", harness.runtime);
+
+		expect(handled).toBe(true);
+		expect(harness.showModelSelector).toHaveBeenCalledWith({ projectOnly: true });
+		expect(harness.setText).toHaveBeenCalledWith("");
+	});
+});
+
 describe("/switch slash command", () => {
 	it("opens the temporary model selector (mirrors alt+p)", async () => {
 		const harness = createRuntime();

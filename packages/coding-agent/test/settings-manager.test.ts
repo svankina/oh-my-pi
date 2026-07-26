@@ -408,6 +408,40 @@ describe("Settings", () => {
 		});
 	});
 
+	describe("project model roles", () => {
+		it("persists a directory default model without changing the global default", async () => {
+			await writeSettings({
+				modelRoles: { default: "global/default-model" },
+			});
+			const projectSettingsPath = path.join(getProjectAgentDir(projectDir), "settings.json");
+			await Bun.write(
+				projectSettingsPath,
+				JSON.stringify({
+					extensions: ["./project-extension.ts"],
+					modelRoles: { smol: "project/smol-model" },
+				}),
+			);
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+			expect(settings.getModelRole("smol")).toBe("project/smol-model");
+			await settings.setProjectModelRole("default", "project/default-model");
+
+			expect((await readSettings()).modelRoles).toEqual({ default: "global/default-model" });
+			expect(JSON.parse(await Bun.file(projectSettingsPath).text())).toEqual({
+				extensions: ["./project-extension.ts"],
+				modelRoles: {
+					default: "project/default-model",
+					smol: "project/smol-model",
+				},
+			});
+
+			resetSettingsForTest();
+			const reloaded = await Settings.init({ cwd: projectDir, agentDir });
+			expect(reloaded.getModelRole("smol")).toBe("project/smol-model");
+			expect(reloaded.getModelRole("default")).toBe("project/default-model");
+		});
+	});
+
 	describe("getEditVariantForModel", () => {
 		it("matches configured model variants case-insensitively", async () => {
 			await writeSettings({

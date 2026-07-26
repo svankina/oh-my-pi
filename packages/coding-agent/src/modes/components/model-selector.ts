@@ -151,6 +151,9 @@ export class ModelSelectorComponent extends Container {
 	#directSelect: boolean;
 	#pickerHint: string | undefined;
 	#currentContextTokens: number;
+	#allowedProviders: readonly string[] | undefined;
+	#requireOAuth: boolean;
+	#compact: boolean;
 	#listLineOffset = 0;
 	#listStartIndex = 0;
 	#listVisibleCount = 0;
@@ -185,6 +188,9 @@ export class ModelSelectorComponent extends Container {
 			pickerHint?: string;
 			initialSearchInput?: string;
 			currentContextTokens?: number;
+			allowedProviders?: readonly string[];
+			requireOAuth?: boolean;
+			compact?: boolean;
 		},
 	) {
 		super();
@@ -198,24 +204,28 @@ export class ModelSelectorComponent extends Container {
 		this.#temporaryOnly = options?.temporaryOnly ?? false;
 		this.#directSelect = options?.directSelect ?? false;
 		this.#pickerHint = options?.pickerHint;
+		this.#allowedProviders = options?.allowedProviders;
+		this.#requireOAuth = options?.requireOAuth ?? false;
+		this.#compact = options?.compact ?? false;
 		const currentContextTokens = options?.currentContextTokens ?? 0;
 		this.#currentContextTokens =
 			Number.isFinite(currentContextTokens) && currentContextTokens > 0 ? Math.floor(currentContextTokens) : 0;
 		const initialSearchInput = options?.initialSearchInput;
 
-		// Initialize menu role actions (built-in + custom from settings)
-		this.#buildMenuRoleActions();
-
-		// Load current role assignments from settings
-		this.#loadRoleModels();
+		if (!this.#compact) {
+			// Initialize role actions and assignments only when the picker exposes them.
+			this.#buildMenuRoleActions();
+			this.#loadRoleModels();
+		}
 
 		// Add top border
 		this.addChild(new DynamicBorder());
 		this.addChild(new Spacer(1));
 
 		// Add hint about model filtering
-		const hintText =
-			scopedModels.length > 0
+		const hintText = this.#compact
+			? "Codex and Anthropic subscription models · type to fuzzy-search"
+			: scopedModels.length > 0
 				? "Showing models from --models scope"
 				: "Only showing models with configured API keys (see README for details)";
 		this.addChild(new Text(theme.fg("warning", hintText), 0, 0));
@@ -444,10 +454,17 @@ export class ModelSelectorComponent extends Container {
 			}
 		}
 
-		const candidates = models.map(item => item.model);
-		this.#loadRoleModels(candidates);
+		models = models.filter(
+			item =>
+				(this.#allowedProviders === undefined || this.#allowedProviders.includes(item.provider)) &&
+				(!this.#requireOAuth || this.#modelRegistry.isUsingOAuth(item.model)),
+		);
 
-		this.#sortModels(models);
+		if (!this.#compact) {
+			this.#loadRoleModels(models.map(item => item.model));
+		}
+
+		this.#sortModels(models, { skipRoleRank: this.#compact });
 
 		this.#allModels = models;
 		this.#filteredModels = models;
@@ -467,8 +484,10 @@ export class ModelSelectorComponent extends Container {
 	#syncFromRegistryState(): void {
 		const selectedKey = this.#getSelectedItem()?.selector;
 		this.#loadModelsFromCurrentRegistryState();
-		this.#buildProviderTabs();
-		this.#updateTabBar();
+		if (!this.#compact) {
+			this.#buildProviderTabs();
+			this.#updateTabBar();
+		}
 		this.#applyTabFilter();
 		if (selectedKey) {
 			const visibleItems = this.#getVisibleItems();
@@ -593,6 +612,10 @@ export class ModelSelectorComponent extends Container {
 
 	#updateTabBar(): void {
 		this.#headerContainer.clear();
+		if (this.#compact) {
+			this.#tabBar = null;
+			return;
+		}
 
 		const tabs: Tab[] = this.#providers.map(provider => ({ id: provider.id, label: provider.label }));
 		const tabBar = new TabBar("Models", tabs, getTabBarTheme(), this.#activeTabIndex);
@@ -889,9 +912,11 @@ export class ModelSelectorComponent extends Container {
 			const searching = this.#searchInput.getValue().trim().length > 0;
 			const message =
 				providerStatus ??
-				(searching && activeProviderId
-					? `  No matching models in ${formatProviderTabLabel(activeProviderId)}. Switch to ALL to search every provider.`
-					: "  No matching models");
+				(this.#compact
+					? "  No subscribed Codex or Anthropic models available."
+					: searching && activeProviderId
+						? `  No matching models in ${formatProviderTabLabel(activeProviderId)}. Switch to ALL to search every provider.`
+						: "  No matching models");
 			this.#listContainer.addChild(new Text(theme.fg("muted", message), 0, 0));
 		} else {
 			const selected = visibleItems[this.#selectedIndex];

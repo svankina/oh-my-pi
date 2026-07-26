@@ -676,6 +676,9 @@ export class SelectorController {
 				{
 					temporaryOnly: options?.temporaryOnly,
 					directSelect: projectOnly,
+					allowedProviders: projectOnly ? ["anthropic", "openai-codex"] : undefined,
+					requireOAuth: projectOnly,
+					compact: projectOnly,
 					pickerHint: projectOnly
 						? "Selection becomes this directory's default model without changing your global default."
 						: undefined,

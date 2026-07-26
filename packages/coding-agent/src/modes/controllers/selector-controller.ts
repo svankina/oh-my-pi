@@ -584,9 +584,8 @@ export class SelectorController {
 		}
 	}
 
-	showModelSelector(options?: { temporaryOnly?: boolean; projectOnly?: boolean }): void {
+	showModelSelector(options?: { temporaryOnly?: boolean }): void {
 		const currentContextTokens = this.ctx.session.getContextUsage()?.tokens ?? 0;
-		const projectOnly = options?.projectOnly ?? false;
 		this.showSelector(done => {
 			const selector = new ModelSelectorComponent(
 				this.ctx.ui,
@@ -601,21 +600,7 @@ export class SelectorController {
 					const isAuto = thinkingLevel === AUTO_THINKING;
 					const concreteThinking = isAuto ? undefined : thinkingLevel;
 					try {
-						if (projectOnly) {
-							await this.ctx.session.setModel(model, "default", {
-								selector,
-								currentContextTokens,
-							});
-							await this.ctx.settings.setProjectModelRole(
-								"default",
-								selector ?? `${model.provider}/${model.id}`,
-							);
-							this.ctx.statusLine.invalidate();
-							this.ctx.updateEditorBorderColor();
-							this.ctx.showStatus(`Project model: ${selector ?? model.id}`);
-							done();
-							this.ctx.ui.requestRender();
-						} else if (role === null) {
+						if (role === null) {
 							// Temporary: update agent state but don't persist the model to settings
 							await this.ctx.session.setModelTemporary(model);
 							if (isAuto) {
@@ -673,14 +658,7 @@ export class SelectorController {
 					done();
 					this.ctx.ui.requestRender();
 				},
-				{
-					temporaryOnly: options?.temporaryOnly,
-					directSelect: projectOnly,
-					pickerHint: projectOnly
-						? "Selection becomes this directory's default model without changing your global default."
-						: undefined,
-					currentContextTokens,
-				},
+				{ ...options, currentContextTokens },
 			);
 			return { component: selector, focus: selector };
 		});

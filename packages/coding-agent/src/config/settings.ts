@@ -26,7 +26,6 @@ import {
 	setWorktreesDir,
 } from "@oh-my-pi/pi-utils";
 import { JSONC, YAML } from "bun";
-import { invalidate as invalidateCapability } from "../capability";
 import { type Settings as SettingsCapabilityItem, settingsCapability } from "../capability/settings";
 import type { ModelRole } from "../config/model-roles";
 import { loadCapability } from "../discovery";
@@ -617,43 +616,6 @@ export class Settings {
 			nextRuntimeOverride[role] = modelId;
 			this.override("modelRoles", nextRuntimeOverride);
 		}
-	}
-	/**
-	 * Persist a model role in this working directory's native OMP settings.
-	 * Unlike {@link setModelRole}, this leaves the global config untouched.
-	 */
-	async setProjectModelRole(role: ModelRole | string, modelId: string): Promise<void> {
-		if (!this.#persist) {
-			throw new Error("Cannot persist a project model role with in-memory or read-only settings");
-		}
-
-		const settingsPath = path.join(this.#cwd, ".omp", "settings.json");
-		await fs.promises.mkdir(path.dirname(settingsPath), { recursive: true });
-		await withFileLock(settingsPath, async () => {
-			let current: RawSettings = {};
-			try {
-				const parsed: unknown = JSON.parse(await Bun.file(settingsPath).text());
-				if (!isRecord(parsed)) {
-					throw new Error("Project settings must be a JSON object");
-				}
-				current = parsed;
-			} catch (error) {
-				if (!isEnoent(error)) {
-					throw new Error(`Failed to read project settings ${settingsPath}: ${String(error)}`);
-				}
-			}
-
-			const roles = this.#modelRolesFromLayer(current);
-			roles[role] = modelId;
-			setByPath(current, ["modelRoles"], roles);
-			await Bun.write(settingsPath, `${JSON.stringify(current, null, 2)}\n`);
-			invalidateCapability(settingsPath);
-		});
-
-		const projectRoles = this.#modelRolesFromLayer(this.#project);
-		projectRoles[role] = modelId;
-		setByPath(this.#project, ["modelRoles"], projectRoles);
-		this.#rebuildMerged();
 	}
 
 	/**

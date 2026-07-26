@@ -349,14 +349,6 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 		},
 	},
 	{
-		name: "mod",
-		description: "Set the default model for this directory",
-		handleTui: (_command, runtime) => {
-			runtime.ctx.showModelSelector({ projectOnly: true });
-			runtime.ctx.editor.setText("");
-		},
-	},
-	{
 		name: "switch",
 		description: "Switch model for this session (same as alt+p)",
 		getTuiAutocompleteDescription: runtime => {

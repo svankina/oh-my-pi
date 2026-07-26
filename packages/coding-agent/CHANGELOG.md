@@ -2,10 +2,6 @@
 
 ## [Unreleased]
 
-### Added
-
-- Added `/mod` to choose and persist a directory-specific default model in `.omp/settings.json`, leaving the global default model unchanged.
-
 ## [16.3.10] - 2026-07-06
 
 ### Changed

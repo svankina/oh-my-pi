@@ -46,20 +46,27 @@ function ctxWithTokenRate(tokensPerSecond: number | null): SegmentContext {
 }
 
 describe("token_rate status-line segment", () => {
-	it("renders per-second throughput without a numeric slash path", () => {
+	it("matches the usage-row throughput rendering", () => {
 		const rendered = renderSegment("token_rate", ctxWithTokenRate(35.5));
 		const content = stripVTControlCharacters(rendered.content);
 
 		expect(rendered.visible).toBe(true);
-		expect(content).toContain("35.5");
-		expect(content).toMatch(/(?:\/s|\bs\b|\bsec(?:ond)?s?\b|\btps\b)/i);
-		expect(content).not.toContain("35.5/s");
-		expect(content).not.toMatch(/\b\d+(?:\.\d+)?\/s\b/);
+		expect(content).toContain("35.5/s");
+		expect(content).not.toContain("tok/s");
 	});
 });
 
 describe("token rate calculation", () => {
-	it("computes from completed message duration metadata", () => {
+	it("excludes time to first token from completed-message throughput", () => {
+		const base = assistantMessage();
+		const rate = calculateTokensPerSecond(
+			[assistantMessage({ usage: { ...base.usage, output: 120 }, duration: 2_000, ttft: 1_000 })],
+			false,
+		);
+		expect(rate).toBe(120);
+	});
+
+	it("uses total duration when time to first token is unavailable", () => {
 		const base = assistantMessage();
 		const rate = calculateTokensPerSecond(
 			[assistantMessage({ usage: { ...base.usage, output: 120 }, duration: 2_000 })],

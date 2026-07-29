@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Anchored the prompt HUD, status footer, and input to the bottom of short terminal viewports, including the initial startup screen.
+
 ## [16.3.10] - 2026-07-06
 
 ### Changed

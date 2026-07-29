@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added opt-in bottom anchoring for a suffix of root components when the rendered frame is shorter than the terminal viewport.
+
 ## [16.3.10] - 2026-07-06
 
 ### Fixed

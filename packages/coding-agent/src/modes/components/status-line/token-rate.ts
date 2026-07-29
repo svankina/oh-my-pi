@@ -8,6 +8,7 @@ type AssistantLikeMessage = {
 	role: "assistant";
 	timestamp: number;
 	duration?: number;
+	ttft?: number;
 	usage: AssistantUsage;
 };
 
@@ -50,16 +51,20 @@ export function calculateTokensPerSecond(
 	const outputTokens = assistant.usage.output;
 	if (!Number.isFinite(outputTokens) || outputTokens <= 0) return null;
 
-	const resolvedDurationMs =
+	const totalDurationMs =
 		typeof assistant.duration === "number" && Number.isFinite(assistant.duration) && assistant.duration > 0
 			? assistant.duration
 			: isStreaming
 				? nowMs - assistant.timestamp
 				: null;
 
-	if (resolvedDurationMs === null || resolvedDurationMs < MIN_DURATION_MS) return null;
+	if (totalDurationMs === null) return null;
+	const ttftMs =
+		typeof assistant.ttft === "number" && Number.isFinite(assistant.ttft) && assistant.ttft > 0 ? assistant.ttft : 0;
+	const generationDurationMs = totalDurationMs - ttftMs;
+	if (generationDurationMs < MIN_DURATION_MS) return null;
 
-	const tokensPerSecond = (outputTokens * 1000) / resolvedDurationMs;
+	const tokensPerSecond = (outputTokens * 1000) / generationDurationMs;
 	if (!Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) return null;
 
 	return tokensPerSecond;

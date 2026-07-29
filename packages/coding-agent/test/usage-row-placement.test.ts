@@ -9,7 +9,7 @@
 import { beforeAll, describe, expect, it, vi } from "bun:test";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { ReadToolGroupComponent } from "@oh-my-pi/pi-coding-agent/modes/components/read-tool-group";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { initTheme, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
 import type { SessionContext } from "@oh-my-pi/pi-coding-agent/session/session-context";
@@ -37,6 +37,8 @@ function readTurn(): AgentMessage[] {
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		},
 		timestamp: Date.now(),
+		duration: 5000,
+		ttft: 1000,
 	} as unknown as AgentMessage;
 	const toolResult = {
 		role: "toolResult",
@@ -90,6 +92,8 @@ describe("UiHelpers.renderSessionContext token-usage row placement", () => {
 		// The usage row is the trailing block and renders the turn's input tokens.
 		const last = children[children.length - 1]!;
 		expect(last.render(120).join("\n")).toContain(USAGE_LABEL);
+		expect(last.render(120).join("\n")).not.toContain(theme.icon.time);
+		expect(last.render(120).join("\n")).not.toContain(theme.icon.throughput);
 		// And it sits strictly below the read group (the bug placed it above).
 		expect(children.length - 1).toBeGreaterThan(readIdx);
 		// Exactly one usage row — no duplication.

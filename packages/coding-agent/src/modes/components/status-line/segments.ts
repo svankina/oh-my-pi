@@ -133,7 +133,7 @@ const modelSegment: StatusLineSegment = {
 		// distinct marker. theme.fg resets only the fg, so the spans are
 		// concatenated (not nested) to keep each color intact.
 		let tail = "";
-		if (ctx.session.isFastModeActive() && theme.icon.fast) {
+		if (ctx.session.isFastModeEnabled() && theme.icon.fast) {
 			tail += ` ${theme.icon.fast}`;
 		}
 		if (!compact && thinkingDisplay) {

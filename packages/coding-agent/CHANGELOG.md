@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Removed TTFT and token-throughput measurements from per-turn token-usage rows.
+
+### Fixed
+
+- Fixed the model status segment omitting its fast badge when fast mode was enabled but not classified as active.
+
 ## [16.3.10] - 2026-07-06
 
 ### Changed

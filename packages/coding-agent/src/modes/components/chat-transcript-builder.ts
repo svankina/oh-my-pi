@@ -82,8 +82,6 @@ export class ChatTranscriptBuilder {
 	#readArgs = new Map<string, Record<string, unknown>>();
 	#readGroup: ReadToolGroupComponent | null = null;
 	#pendingUsage: Usage | undefined;
-	#pendingUsageDuration: number | undefined;
-	#pendingUsageTtft: number | undefined;
 	#lastAssistantUsage: Usage | undefined;
 	#waitingPoll: ToolExecutionComponent | null = null;
 	#todoSnapshot: ToolExecutionComponent | null = null;
@@ -130,8 +128,6 @@ export class ChatTranscriptBuilder {
 		this.#readArgs.clear();
 		this.#readGroup = null;
 		this.#pendingUsage = undefined;
-		this.#pendingUsageDuration = undefined;
-		this.#pendingUsageTtft = undefined;
 		this.#lastAssistantUsage = undefined;
 		this.#waitingPoll = null;
 		this.#todoSnapshot = null;
@@ -199,12 +195,8 @@ export class ChatTranscriptBuilder {
 		if (!this.#pendingUsage) return;
 		this.#readGroup?.seal();
 		this.#readGroup = null;
-		this.container.addChild(
-			createUsageRowBlock(this.#pendingUsage, this.#pendingUsageDuration, this.#pendingUsageTtft),
-		);
+		this.container.addChild(createUsageRowBlock(this.#pendingUsage));
 		this.#pendingUsage = undefined;
-		this.#pendingUsageDuration = undefined;
-		this.#pendingUsageTtft = undefined;
 	}
 
 	#appendChatMessage(message: AgentMessage): void {
@@ -359,8 +351,6 @@ export class ChatTranscriptBuilder {
 
 		this.#pendingUsage =
 			settings.get("display.showTokenUsage") && assistantUsageIsBilled(message.usage) ? message.usage : undefined;
-		this.#pendingUsageDuration = message.duration;
-		this.#pendingUsageTtft = message.ttft;
 	}
 
 	#appendToolResult(message: Extract<AgentMessage, { role: "toolResult" }>): void {

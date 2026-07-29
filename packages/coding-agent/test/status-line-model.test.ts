@@ -8,11 +8,11 @@ beforeAll(async () => {
 	await initTheme();
 });
 
-function createModelContext(advisorActive: boolean): SegmentContext {
+function createModelContext(advisorActive: boolean, fastModeEnabled = false): SegmentContext {
 	return {
 		session: {
 			state: { model: { id: "test-model", name: "Test Model" } },
-			isFastModeActive: () => false,
+			isFastModeEnabled: () => fastModeEnabled,
 			isAutoThinking: false,
 			autoResolvedThinkingLevel: () => undefined,
 			isAdvisorActive: () => advisorActive,
@@ -66,6 +66,13 @@ describe("status line model segment advisor badge", () => {
 	});
 });
 
+describe("status line model segment fast badge", () => {
+	it("shows the fast icon when fast mode is enabled", () => {
+		const rendered = renderSegment("model", createModelContext(false, true));
+		expect(Bun.stripANSI(rendered.content)).toContain(`Test Model ${theme.icon.fast}`);
+	});
+});
+
 describe("status line model segment compact thinking level", () => {
 	function createThinkingContext(compactThinkingLevel: boolean): SegmentContext {
 		return {
@@ -75,7 +82,7 @@ describe("status line model segment compact thinking level", () => {
 					model: { id: "test-model", name: "Test Model", thinking: true },
 					thinkingLevel: ThinkingLevel.High,
 				},
-				isFastModeActive: () => false,
+				isFastModeEnabled: () => false,
 				isAutoThinking: false,
 				autoResolvedThinkingLevel: () => undefined,
 				isAdvisorActive: () => false,

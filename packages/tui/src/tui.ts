@@ -1051,10 +1051,6 @@ export class TUI extends Container {
 	#composedFrame: string[] = [];
 	// Per-root-child segment ledger backing the stable-prefix computation.
 	#frameSegments: FrameSegment[] = [];
-	// First root child in the viewport-bottom-anchored suffix. When the composed
-	// frame is shorter than the terminal, blank rows are inserted immediately
-	// before this child so prompt chrome stays against the viewport bottom.
-	#viewportBottomAnchor: Component | undefined;
 	#composeWidth = -1;
 	// Cursor markers stripped at ingestion, ascending by frame row.
 	#frameCursorMarkers: { row: number; col: number }[] = [];
@@ -1102,16 +1098,6 @@ export class TUI extends Container {
 		this.#renderScheduler = options?.renderScheduler ?? DEFAULT_RENDER_SCHEDULER;
 		this.#showHardwareCursor = showHardwareCursor === undefined ? this.#showHardwareCursor : showHardwareCursor;
 		this.#watchdog = new LoopWatchdog();
-	}
-
-	/**
-	 * Keep `component` and every root child after it against the bottom of a
-	 * short viewport. Pass undefined to restore the default top-aligned layout.
-	 */
-	setViewportBottomAnchor(component: Component | undefined): void {
-		if (this.#viewportBottomAnchor === component) return;
-		this.#viewportBottomAnchor = component;
-		this.requestRender(true);
 	}
 
 	override render(width: number): readonly string[] {
@@ -1201,22 +1187,6 @@ export class TUI extends Container {
 			};
 			offset += childLines.length;
 		}
-		const anchorIndex = this.#viewportBottomAnchor === undefined ? -1 : children.indexOf(this.#viewportBottomAnchor);
-		if (anchorIndex >= 0 && offset < this.terminal.rows) {
-			const anchorStart = segments[anchorIndex]?.start ?? offset;
-			const paddingRows = this.terminal.rows - offset;
-			for (let index = anchorIndex; index < segments.length; index++) {
-				segments[index]!.start += paddingRows;
-			}
-			offset += paddingRows;
-			// The padding changes height as content grows, so it and the anchored
-			// suffix are always live even when their component rows are stable.
-			stableRows = Math.min(stableRows, anchorStart);
-			this.#nativeScrollbackLiveRegionStart =
-				this.#nativeScrollbackLiveRegionStart === undefined
-					? anchorStart
-					: Math.min(this.#nativeScrollbackLiveRegionStart, anchorStart);
-		}
 		this.#frameSegments = segments;
 
 		const frame = this.#composedFrame;
@@ -1230,7 +1200,6 @@ export class TUI extends Container {
 			frame.length = stableRows;
 			this.#pruneFrameCursorMarkers(stableRows);
 			for (const segment of segments) {
-				while (frame.length < segment.start) this.#ingestFrameRow("");
 				const lines = segment.lines;
 				const from = segment.start >= stableRows ? 0 : stableRows - segment.start;
 				for (let i = from; i < lines.length; i++) this.#ingestFrameRow(lines[i]!);
@@ -3362,18 +3331,15 @@ export class TUI extends Container {
 	 * `height` rows of the would-be full frame, collected bottom-up across root
 	 * children. {@link ViewportTailProvider}s (the transcript) yield only their
 	 * tail; the small live-region children below render in full — so every child
-	 * entirely above the fold is skipped. A short unanchored frame stays
-	 * top-aligned; a short anchored frame receives the same blank gap before its
-	 * anchored suffix as the authoritative full paint.
-	 * Cursor markers are stripped (the drag hides the hardware cursor), and rows
-	 * are width-fitted via the stateless preparer, so no persistent prepared-frame
-	 * cache is touched.
+	 * entirely above the fold is skipped. A frame shorter than the viewport is
+	 * top-aligned with blank rows below, matching the full-paint window geometry
+	 * (windowTop = max(0, frameLength - height)). Cursor markers are stripped
+	 * (the drag hides the hardware cursor) and rows are width-fitted via the
+	 * stateless preparer, so no persistent prepared-frame cache is touched.
 	 */
 	#composeResizeViewport(width: number, height: number): { window: readonly string[]; contentRows: number } {
 		const tail: string[] = []; // bottom-first
 		const children = this.children;
-		const anchorIndex = this.#viewportBottomAnchor === undefined ? -1 : children.indexOf(this.#viewportBottomAnchor);
-		let anchorSuffixRows: number | undefined;
 		for (let i = children.length - 1; i >= 0 && tail.length < height; i--) {
 			const child = children[i]!;
 			const provider = asViewportTailProvider(child);
@@ -3381,20 +3347,17 @@ export class TUI extends Container {
 			for (let r = rows.length - 1; r >= 0 && tail.length < height; r--) {
 				tail.push(rows[r]!);
 			}
-			if (i === anchorIndex) anchorSuffixRows = tail.length;
 		}
 		const count = tail.length;
-		const ordered = tail.reverse();
-		const anchored = anchorSuffixRows !== undefined && count < height;
-		if (anchorSuffixRows !== undefined && count < height) {
-			ordered.splice(count - anchorSuffixRows, 0, ...new Array<string>(height - count).fill(""));
-		}
 		const window: string[] = new Array(height);
 		for (let screenRow = 0; screenRow < height; screenRow++) {
-			window[screenRow] = ordered[screenRow] ?? "";
+			// `tail` holds the bottom `count` frame rows, bottom-first. They fill
+			// the viewport when the frame overflows it and sit at the top (blanks
+			// below) when it underflows.
+			window[screenRow] = screenRow < count ? tail[count - 1 - screenRow]! : "";
 		}
 		this.#extractCursorMarkers(window);
-		return { window: this.#prepareLinesArray(window, width), contentRows: anchored ? height : count };
+		return { window: this.#prepareLinesArray(window, width), contentRows: count };
 	}
 
 	/**

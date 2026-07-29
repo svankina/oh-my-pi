@@ -919,9 +919,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.ui.addChild(this.hookWidgetContainerAbove);
 		this.ui.addChild(this.editorContainer);
 		this.ui.addChild(this.hookWidgetContainerBelow);
-		// Keep the prompt HUD, status/footer, and input against the viewport
-		// bottom while the welcome/transcript is shorter than the terminal.
-		this.ui.setViewportBottomAnchor(this.todoContainer);
 		this.ui.setFocus(this.editor);
 
 		this.#inputController.setupKeyHandlers();

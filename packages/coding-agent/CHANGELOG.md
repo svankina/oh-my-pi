@@ -9,9 +9,6 @@
 ### Fixed
 
 - Fixed the model status segment omitting its fast badge when fast mode was enabled but not classified as active.
-### Fixed
-
-- Anchored the prompt HUD, status footer, and input to the bottom of short terminal viewports, including the initial startup screen.
 
 ## [16.3.10] - 2026-07-06
 

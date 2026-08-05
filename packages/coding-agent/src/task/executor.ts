@@ -204,6 +204,18 @@ function resolveSubagentDefaultRetryFallbackChain(
 	});
 }
 
+function resolveCrossProviderParentRetryFallback(
+	parentActiveModelPattern: string | undefined,
+	activeModel: Model<Api> | undefined,
+	modelRegistry: ModelRegistry,
+	settings: Settings,
+): string[] | undefined {
+	if (!parentActiveModelPattern || !activeModel) return undefined;
+	const [parent] = resolveSubagentRetryFallbackCandidates([parentActiveModelPattern], modelRegistry, settings);
+	if (!parent || parent.model.provider === activeModel.provider) return undefined;
+	return [parent.selector];
+}
+
 function installSubagentRetryFallbackChain(args: {
 	settings: Settings;
 	id: string;
@@ -221,7 +233,8 @@ function installSubagentRetryFallbackChain(args: {
 	if (selectedIndex < 0) return undefined;
 	const fallbackSelectors = candidates.slice(selectedIndex + 1).map(candidate => candidate.selector);
 	const existingFallbackChains = settings.get("retry.fallbackChains");
-	// A single explicit model may reuse a configured default chain, but never an implicit parent fallback.
+	// A single explicit model may reuse the configured default chain or, when
+	// none exists, a cross-provider parent model.
 	const fallbackChain = fallbackSelectors.length > 0 ? fallbackSelectors : defaultFallbackChain;
 	if (
 		!Array.isArray(fallbackChain) ||
@@ -2851,11 +2864,21 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					resolvedModel: model.id,
 				});
 			}
+			const effectiveDefaultRetryFallbackChain =
+				defaultRetryFallbackChain ??
+				(configuredModelPatterns.length === 1
+					? resolveCrossProviderParentRetryFallback(
+							options.parentActiveModelPattern,
+							model,
+							modelRegistry,
+							subagentSettings,
+						)
+					: undefined);
 			const retryFallbackRole = installSubagentRetryFallbackChain({
 				settings: subagentSettings,
 				id,
 				candidates: resolveSubagentRetryFallbackCandidates(modelPatterns, modelRegistry, subagentSettings),
-				defaultFallbackChain: defaultRetryFallbackChain,
+				defaultFallbackChain: effectiveDefaultRetryFallbackChain,
 				model,
 				authFallbackUsed,
 			});

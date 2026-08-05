@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed single-model task subagents getting stranded on Anthropic account-wide rate limits: they now inherit the configured default retry chain, or fall back to a cross-provider parent model when no chain is configured.
+
 ## [17.2.9] - 2026-08-05
 
 ### Breaking Changes
@@ -1632,6 +1636,7 @@
 - Fixed session titles occasionally showing raw `{"title": "..."}` JSON. Online title generation now always uses the `<title>...</title>` marker prompt instead of a forced `set_title` tool call — hosts that ignored or rejected forced `tool_choice` echoed the prompt's JSON example verbatim as the title — and JSON-shaped responses (bare, code-fenced, marker-wrapped, or truncated) are unwrapped to the bare title.
 - Fixed Linux startup prompt construction to read the CPU model from `/proc/cpuinfo` instead of `os.cpus()`, avoiding per-core sysfs frequency probes on many-core hosts ([#4712](https://github.com/can1357/oh-my-pi/issues/4712)).
 - Fixed llama.cpp model discovery to honor per-model `architecture.input_modalities` from `/v1/models`, so router presets that advertise image input are no longer treated as text-only ([#4719](https://github.com/can1357/oh-my-pi/issues/4719)).
+- Fixed the model status segment omitting its fast badge when fast mode was enabled but not classified as active.
 
 ## [16.3.10] - 2026-07-06
 

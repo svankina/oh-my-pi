@@ -207,13 +207,15 @@ describe("subagent runtime model resolution", () => {
 		});
 	});
 
-	it("keeps a single local subagent model pinned without a configured fallback chain", async () => {
+	it("falls back to a cross-provider parent when a single subagent model has no configured chain", async () => {
 		const primary = model("lm-studio", "local-reviewer");
 		const parent = model("openai-codex", "gpt-5.6-sol");
 		let childModelRole: string | undefined;
+		let childFallbackChain: string[] | undefined;
 		vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async options => {
 			if (!options) throw new Error("Expected createAgentSession options");
 			childModelRole = options.settings?.getModelRoles()["subagent:single-model-no-fallback"];
+			childFallbackChain = options.settings?.get("retry.fallbackChains")["subagent:single-model-no-fallback"];
 			return { session: createYieldingSession(), extensionsResult: {}, setToolUIContext: () => {} } as never;
 		});
 
@@ -235,7 +237,8 @@ describe("subagent runtime model resolution", () => {
 			enableLsp: false,
 		});
 
-		expect(childModelRole).toBeUndefined();
+		expect(childModelRole).toBe("lm-studio/local-reviewer");
+		expect(childFallbackChain).toEqual(["openai-codex/gpt-5.6-sol"]);
 	});
 
 	it("preserves malformed fallback configuration for child validation", async () => {

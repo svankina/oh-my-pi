@@ -62,7 +62,7 @@ const MAX_TOKENS = 96;
 const PREDICTION_CHARS = 110;
 /** Settle-to-request delay. Swallows the burst of events around the end of a turn. */
 const DEBOUNCE_MS = 300;
-/** Sentinel the model returns when nothing is worth predicting. */
+/** Sentinel the model returns when the conversation genuinely has no next step to guess. */
 const DECLINE = "NONE";
 
 const SYSTEM_PROMPT = [
@@ -73,10 +73,15 @@ const SYSTEM_PROMPT = [
 	"",
 	"Rules:",
 	"- One line, at most 100 characters, phrased exactly as the user would type it (imperative, lowercase is fine).",
-	"- Predict the obvious next step: run/verify what was just built, fix a problem the agent just reported,",
-	"  commit finished work, or ask about the specific thing left unresolved.",
 	"- Reference concrete names from the conversation (files, commands, symbols) when they make the guess sharper.",
-	`- If the conversation gives no confident next step, output exactly ${DECLINE}.`,
+	"- Always commit to a guess when the agent has done any concrete work. Several plausible follow-ups is not a",
+	"  reason to decline: pick the most likely one. Work through this ladder and take the first rung that applies:",
+	"  1. the agent reported a problem, failure or something it could not do -> ask for the fix",
+	"  2. the agent left a specific loose end or offered a next step -> take it",
+	"  3. the agent built or changed something but never ran it -> run/verify it",
+	"  4. the work is finished and verified -> commit it",
+	`- Output exactly ${DECLINE} only when there is nothing to go on: no concrete work in the conversation at all`,
+	"  (a bare greeting or small talk), or the agent has not answered the user's last message yet.",
 ].join("\n");
 
 interface SessionEntryLike {

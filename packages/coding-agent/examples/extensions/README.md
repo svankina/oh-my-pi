@@ -43,6 +43,7 @@ cp permission-gate.ts ~/.omp/agent/extensions/
 | `status-line.ts` | Shows turn progress in footer via `ctx.ui.setStatus()` with themed colors      |
 | `thinking-note.ts` | Adds display-only supplemental UI below assistant thinking blocks              |
 | `snake.ts`       | Snake game with custom UI, keyboard handling, and session persistence          |
+| `predictive-input.ts` | Predicts your next message with `@smol` and shows it as dim ghost text; Tab accepts |
 
 ### Git Integration
 

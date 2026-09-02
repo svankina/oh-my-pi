@@ -5,7 +5,7 @@ import { getRoleInfo } from "../../config/model-roles";
 import type { Settings } from "../../config/settings";
 import { type AgentRef, MAIN_AGENT_ID } from "../../registry/agent-registry";
 import { parseThinkingLevel } from "../../thinking";
-import { replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "../../tools/render-utils";
+import { replaceTabs, stripModelProvider, TRUNCATE_LENGTHS, truncateToWidth } from "../../tools/render-utils";
 import type { ObservableSession } from "../session-observer-registry";
 import { theme } from "../theme/theme";
 import type { AgentMetrics } from "./agent-hub-projection";
@@ -88,7 +88,7 @@ function formatResolvedModelBadge(resolved: string, preserveProvider = false, fa
 	const colon = cleanResolved.lastIndexOf(":");
 	const explicitLevel = colon >= 0 ? parseThinkingLevel(cleanResolved.slice(colon + 1)) : undefined;
 	const selector = explicitLevel !== undefined ? cleanResolved.slice(0, colon) : cleanResolved;
-	const label = preserveProvider ? selector : selector.slice(selector.indexOf("/") + 1);
+	const label = preserveProvider ? selector : stripModelProvider(selector);
 	return formatModelBadge(label, explicitLevel ?? fallbackLevel);
 }
 

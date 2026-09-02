@@ -23,6 +23,7 @@ import {
 	previewLine,
 	previewWindowRows,
 	replaceTabs,
+	stripModelProvider,
 	type ToolUIStatus,
 	truncateToWidth,
 } from "../tools/render-utils";
@@ -120,7 +121,7 @@ function appendAgentStats(
 		line += `${theme.sep.dot}${theme.fg("statusLineCost", `$${opts.cost.toFixed(2)}`)}`;
 	}
 	if (opts.resolvedModel && opts.showResolvedModelBadge) {
-		line += `${theme.sep.dot}${theme.fg("dim", truncateToWidth(replaceTabs(opts.resolvedModel), 30))}`;
+		line += `${theme.sep.dot}${theme.fg("dim", truncateToWidth(replaceTabs(stripModelProvider(opts.resolvedModel)), 30))}`;
 	}
 	return line;
 }

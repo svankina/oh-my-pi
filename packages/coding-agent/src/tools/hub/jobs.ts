@@ -23,6 +23,7 @@ import {
 	getPreviewLines,
 	PREVIEW_LIMITS,
 	replaceTabs,
+	stripModelProvider,
 	type ToolUIColor,
 	type ToolUIStatus,
 } from "../render-utils";
@@ -659,7 +660,7 @@ export function jobsRenderResult(
 								? `${uiTheme.sep.dot}${uiTheme.fg(
 										"dim",
 										truncateToWidth(
-											replaceTabs(job.resolvedModel.trim()),
+											replaceTabs(stripModelProvider(job.resolvedModel.trim())),
 											MODEL_BADGE_MAX_WIDTH,
 											Ellipsis.Unicode,
 										),

@@ -255,6 +255,16 @@ export function formatMeta(meta: string[], theme: Theme): string {
 	return meta.length > 0 ? ` ${theme.fg("muted", meta.join(theme.sep.dot))}` : "";
 }
 
+/**
+ * Drop the `provider/` prefix from a model selector for compact badges:
+ * `google-antigravity/gemini-3.7-flash:medium` → `gemini-3.7-flash:medium`.
+ * Model ids may themselves contain `/` (`openrouter/anthropic/claude`), so only
+ * the first segment is treated as the provider.
+ */
+export function stripModelProvider(selector: string): string {
+	return selector.slice(selector.indexOf("/") + 1);
+}
+
 function sanitizeErrorText(message: string | undefined): string {
 	const clean = (message ?? "").replace(/^Error:\s*/, "").trim();
 	return clean ? replaceTabs(truncateToWidth(clean, TRUNCATE_LENGTHS.LINE)) : "Unknown error";

@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
-import { Settings } from "../../src/config/settings";
+import { Settings, settings } from "../../src/config/settings";
 import { getThemeByName, setThemeInstance, type Theme } from "../../src/modes/theme/theme";
 import { renderResult } from "../../src/task/render";
 import { taskToolRenderer } from "../../src/task/renderer";
@@ -283,5 +283,29 @@ describe("task live progress rendering", () => {
 			);
 
 		expect(render(0)).toBe(render(1));
+	});
+
+	it("shows the resolved model badge without its provider prefix", () => {
+		settings.set("task.showResolvedModelBadge", true);
+		try {
+			const progress: AgentProgress = {
+				...makeProgress([]),
+				resolvedModel: "google-antigravity/gemini-3.7-flash:medium",
+			};
+			const live = renderProgressText(progress, false, uiTheme);
+			expect(live).toContain("gemini-3.7-flash:medium");
+			expect(live).not.toContain("google-antigravity/");
+
+			const details: TaskToolDetails = {
+				projectAgentsDir: null,
+				results: [makeSingleResult(0, { resolvedModel: "anthropic/claude-fable-5-1:high" })],
+				totalDurationMs: 1,
+			};
+			const done = renderResultText(details, false, uiTheme);
+			expect(done).toContain("claude-fable-5-1:high");
+			expect(done).not.toContain("anthropic/");
+		} finally {
+			settings.set("task.showResolvedModelBadge", false);
+		}
 	});
 });
